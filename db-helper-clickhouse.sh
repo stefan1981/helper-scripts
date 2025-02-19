@@ -1,9 +1,27 @@
 #!/bin/bash
 
+# check if .env file exists in the current folder
+if [ ! -f ".env" ]; then
+    echo "This script can only be executed in a folder that contains a .env file"
+    echo "with the values CLICKHOUSE_DB, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD"
+    exit 0
+fi
+
 source .env
 
+# check if environment variables exist
+if [ -z "${CLICKHOUSE_DB}" ] || [ -z "${CLICKHOUSE_USER}" ] || [ -z "${CLICKHOUSE_PASSWORD}" ]; then
+    echo "Check that this values exist in .env file: CLICKHOUSE_DB, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD"
+    exit 0  # Exit with an error code
+fi
+
+DBNAME=${CLICKHOUSE_DB}
+USER=${CLICKHOUSE_USER}
+PASSWORD=${CLICKHOUSE_PASSWORD}
+
+
 DEXEC="docker exec -i datastore-clickhouse"
-MDB="clickhouse-client --user default --password ${CLICKHOUSE_PASSWORD}"
+MDB="clickhouse-client --user ${CLICKHOUSE_USER} --password ${CLICKHOUSE_PASSWORD}"
 
 # dump general database
 DB_NAME=general2
