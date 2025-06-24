@@ -1,13 +1,12 @@
-name: GitHub Actions Demo
-run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
+name: GitHub Actions
+run-name: ${{ github.actor }} is testing out GitHub Actions
 on: [push]
 jobs:
-  Explore-GitHub-Actions:
+  GitHub-Actions-Basics:
     runs-on: ubuntu-latest
     steps:
-      - name: Display GitHub Context
+      - name: Show Github Variables
         run: |
-          echo "GitHub Context:"
           echo "Actor: ${{ github.actor }}"
           echo "Event Name: ${{ github.event_name }}"
           echo "Repository: ${{ github.repository }}"
