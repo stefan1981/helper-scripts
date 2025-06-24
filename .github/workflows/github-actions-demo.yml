@@ -23,4 +23,14 @@ jobs:
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY_1BLUE }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SSH_HOST_1BLUE }} >> ~/.ssh/known_hosts
+
+      - name: Run remote deploy script
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER_1BLUE }}@${{ secrets.SSH_HOST_1BLUE }} "bash ~/deploy-script.sh"          
       - run: echo "🍏 This job's status is ${{ job.status }}."
