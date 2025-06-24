@@ -5,7 +5,9 @@ jobs:
   Explore-GitHub-Actions:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Event:${{ github.event_name }}, OS:${{ runner.os }}, Branch${{ github.ref }}, Repository:${{ github.repository }}"      
+      - run: |
+          echo "Event:${{ github.event_name }}, OS:${{ runner.os }}"      
+          echo "Branch:${{ github.ref }}, Repository:${{ github.repository }}"      
       - name: Check out repository code
         uses: actions/checkout@v4
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
