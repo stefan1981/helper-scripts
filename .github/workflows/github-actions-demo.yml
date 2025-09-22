@@ -16,21 +16,23 @@ jobs:
           echo "Run Attempt: ${{ github.run_attempt }}"
           echo "Run Number: ${{ github.run_number }}"
           echo "Job Status: ${{ job.status }}"
+
       - name: Check out repository code
         uses: actions/checkout@v4
+        
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
-      - name: Set up SSH
+
+      - name: SSH - setup connection
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY_1BLUE }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.SSH_HOST_1BLUE }} >> ~/.ssh/known_hosts
-
-      - name: Run remote deploy script
+      - name: SSH - run deployment script on remote server
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.SSH_USER_1BLUE }}@${{ secrets.SSH_HOST_1BLUE }} "bash ~/deploy-script.sh"          
       - run: echo "🍏 This job's status is ${{ job.status }}."
