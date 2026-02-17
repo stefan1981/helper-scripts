@@ -3,22 +3,22 @@
 # check if .env file exists in the current folder
 if [ ! -f ".env" ]; then
     echo "This script can only be executed in a folder that contains a .env file"
-    echo "with the values MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD"
+    echo "with the values MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, MYSQL_CONTAINER_NAME"
     exit 0
 fi
 
 source .env
 
 # check if environment variables exist
-if [ -z "${MYSQL_DATABASE}" ] || [ -z "${MYSQL_USER}" ] || [ -z "${MYSQL_PASSWORD}" ] || [ -z "${DB_CONTAINER_NAME}" ]; then
-    echo "Check that this values exist in .env file: MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, DB_CONTAINER_NAME"
+if [ -z "${MYSQL_DATABASE}" ] || [ -z "${MYSQL_USER}" ] || [ -z "${MYSQL_PASSWORD}" ] || [ -z "${MYSQL_CONTAINER_NAME}" ]; then
+    echo "Check that this values exist in .env file: MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, MYSQL_CONTAINER_NAME"
     exit 0  # Exit with an error code
 fi
 
 DBNAME=${MYSQL_DATABASE}
 USER=${MYSQL_USER}
 PASSWORD=${MYSQL_PASSWORD}
-CONTAINER_NAME=${DB_CONTAINER_NAME}
+CONTAINER_NAME=${MYSQL_CONTAINER_NAME}
 
 DEXEC="docker exec -i ${CONTAINER_NAME}"
 MDB="mariadb -u ${USER} -p${PASSWORD} -D ${DBNAME}"
@@ -43,7 +43,7 @@ elif [ "$1" == "drop-db" ]; then
     ${DEXEC} ${MDB} -e "DROP DATABASE $2;"
     echo $2
 
-elif [ "$1" == "tables-show" ]; then
+elif [[ "$1" == "tables-show" || "$1" == "t" ]]; then
     ${DEXEC} ${MDB} --table -e "
         SELECT
             table_schema                         AS database_name,

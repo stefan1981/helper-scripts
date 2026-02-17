@@ -3,24 +3,24 @@
 # check if .env file exists in the current folder
 if [ ! -f ".env" ]; then
     echo "This script can only be executed in a folder that contains a .env file"
-    echo "with the values CLICKHOUSE_DB, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD"
+    echo "with the values CLICKHOUSE_DB, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, CLICKHOUSE_CONTAINER_NAME"
     exit 0
 fi
 
 source .env
 
 # check if environment variables exist
-if [ -z "${CLICKHOUSE_DB}" ] || [ -z "${CLICKHOUSE_USER}" ] || [ -z "${CLICKHOUSE_PASSWORD}" ]; then
-    echo "Check that this values exist in .env file: CLICKHOUSE_DB, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD"
+if [ -z "${CLICKHOUSE_DB}" ] || [ -z "${CLICKHOUSE_USER}" ] || [ -z "${CLICKHOUSE_PASSWORD}" ] || [ -z "${CLICKHOUSE_CONTAINER_NAME}" ]; then
+    echo "Check that this values exist in .env file: CLICKHOUSE_DB, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, CLICKHOUSE_CONTAINER_NAME"
     exit 0  # Exit with an error code
 fi
 
 DBNAME=${CLICKHOUSE_DB}
 USER=${CLICKHOUSE_USER}
 PASSWORD=${CLICKHOUSE_PASSWORD}
+CONTAINER_NAME=${CLICKHOUSE_CONTAINER_NAME}
 
-
-DEXEC="docker exec -i datastore-clickhouse"
+DEXEC="docker exec -i ${CONTAINER_NAME}"
 MDB="clickhouse-client --user ${CLICKHOUSE_USER} --password ${CLICKHOUSE_PASSWORD}"
 
 
@@ -72,7 +72,7 @@ elif [ "$1" == "db-create" ]; then
 elif [ "$1" == "db-drop" ]; then
     ${DEXEC} ${MDB} --query "DROP DATABASE IF EXISTS $2;"
 
-elif [ "$1" == "tables-show" ]; then
+elif [[ "$1" == "tables-show" || "$1" == "t" ]]; then
     ${DEXEC} ${MDB} --query "
         SELECT
             database,
@@ -86,7 +86,7 @@ elif [ "$1" == "tables-show" ]; then
         FORMAT Pretty;
     "
 
-elif [ "$1" == "table-create-example" ]; then
+elif [ "$1" == "table-create-example" ] || [ "$1" = "tc1" ]; then
     ${DEXEC} ${MDB} --query "
         CREATE TABLE $DBNAME.$2 (
             id UInt32,
@@ -97,7 +97,7 @@ elif [ "$1" == "table-create-example" ]; then
         ENGINE = MergeTree()
         ORDER BY id;
     "
-elif [ "$1" == "table-create-example2" ]; then
+elif [ "$1" == "table-create-example2" ] || [ "$1" = "tc2" ]; then
     ${DEXEC} ${MDB} --query "
         CREATE TABLE $DBNAME.$2 (
             id UUID DEFAULT generateUUIDv4(),
@@ -111,7 +111,7 @@ elif [ "$1" == "table-truncate" ]; then
     ${DEXEC} ${MDB} --query "TRUNCATE TABLE IF EXISTS $DBNAME.$2"
 
 
-elif [ "$1" == "table-drop" ]; then
+elif [ "$1" == "table-drop" ] || [ "$1" = "d" ]; then
     ${DEXEC} ${MDB} --query "DROP TABLE IF EXISTS $DBNAME.$2;"
 
 elif [ "$1" == "table-describe" ]; then
@@ -155,15 +155,26 @@ elif [ "$1" == "exec" ]; then
 
 
 elif [ "$1" == "dump" ]; then
-    echo "dump general database into file (my_general.sql)"
-    #${DEXEC} mariadb-dump -u root -p${MYSQL_PASSWORD} general > my_general.sql
-    #${DEXEC} ${MDB} --query "BACKUP TABLE general.test01 TO 'test.sql'"
+    DB="$DBNAME"
+    TABLE="$2"
+    FILE="$3"
+
+    echo "Dumping $DB.$TABLE → $FILE"
+
+    (
+        echo "DROP TABLE IF EXISTS \`$DB\`.\`$TABLE\`;"
+        # ${DEXEC} ${MDB} --query "SHOW CREATE TABLE \`$DB\`.\`$TABLE\`";
+        ${DEXEC} ${MDB} --format=TSVRaw --query "SHOW CREATE TABLE \`$DB\`.\`$TABLE\`";
+
+        echo ";"
+        ${DEXEC} ${MDB} --query "SELECT * FROM \`$DB\`.\`$TABLE\` FORMAT SQLInsert"
+    ) > "$FILE"
+
 
 elif [ "$1" == "restore" ]; then
     echo "restore my_general.sql into database general2 (delete general2 before)"
-    #${DEXEC} ${MDB} -e "DROP DATABASE IF EXISTS ${DB_NAME}"
-    #${DEXEC} ${MDB} -e "CREATE DATABASE IF NOT EXISTS ${DB_NAME}"
-    #cat my_general.sql | ${DEXEC} ${MDB} ${DB_NAME}
+    ${DEXEC} ${MDB} --multiquery < "$2"
+
 
 
 elif [ "$1" == "show-grants" ]; then
@@ -180,30 +191,34 @@ elif [ "$1" == "revoke-all-privileges" ]; then
     #${DEXEC} ${MDB} --query "REVOKE ALL PRIVILEGES ON $2.* FROM '$3'@'%'; FLUSH PRIVILEGES;"
     echo $2
 
-elif [ "$1" == "help" ]; then
+elif [ "$1" == "help" ] || [ "$1" == "h" ]; then
     script=$(basename "$0")    
     echo "Usage:"
+    echo "$script parameter"
+    echo ""
+    echo "Parameters:"
     # echo "$script db-info-general                    # show general db infos"
-    echo "$script user-info                          # show general user infos"
-    echo "$script db-show                            # show all dbs"
-    echo "$script db-create db                       # create the db with the name db"
-    echo "$script db-drop db                         # drop the db with the name db"
-    echo "$script tables-show                        # show tables in db"
-    echo "$script table-create-example table         # create example table in db (id, name, age, created_at)"
-    echo "$script table-create-example2 table        # create example table in db (id, text)"
-    echo "$script table-truncate table               # truncate table in db"
-    echo "$script table-drop table                   # drop table in db"
-    echo "$script table-describe table               # describe table in db"
+    echo "user-info                          # show general user infos"
+    echo "db-show                            # show all dbs"
+    echo "db-create db                       # create the db with the name db"
+    echo "db-drop db                         # drop the db with the name db"
+    echo "tables-show                        # (t) show tables in db"
+    echo "table-create-example table         # (tc1) create example table in db (id, name, age, created_at)"
+    echo "table-create-example2 table        # (tc2) create example table in db (id, text)"
+    echo "table-truncate table               # truncate table in db"
+    echo "table-drop table                   # (d) drop table in db"
+    echo "table-describe table               # describe table in db"
 
-    echo "$script insert-lines table < command       # insert into a table"
-    echo "$script select table [search]              # select data from a table, optional you can pass a searchterm"
-    echo "$script exec sql                           # execute an arbitrary sql command"
+    echo "insert-lines table                 # (i) insert into a table (cat x.txt | xx-clickhouse.sh i table)"
+    echo "select table [search]              # select data from a table, optional you can pass a searchterm"
+    echo "exec sql                           # execute an arbitrary sql command"
 
-    echo "todo $script dump                          # store db general to my_general.sql file"
-    echo "todo $script restore                       # restore my_general.sql file to general2 db"    
-    echo "$script show-grants user                   # show all grants of a specific user"
-    echo "todo $script grant-all-privileges db user  # grant all privileges for user on db"
-    echo "todo $script revoke-all-privileges db user # revoke all privileges for user on db"
+    echo "(todo) dump                          # store db general to my_general.sql file"
+    echo "(todo) restore                       # restore my_general.sql file to general2 db"    
+    echo "show-grants user                   # show all grants of a specific user"
+    echo "(todo) grant-all-privileges db user  # grant all privileges for user on db"
+    echo "(todo) revoke-all-privileges db user # revoke all privileges for user on db"
+    echo "help                               # (h) shows this help message"
     exit 1
 else
     ${DEXEC} ${MDB} --query "SELECT 'Clickhouse Version: ' || version();"

@@ -3,24 +3,24 @@
 # check if .env file exists in the current folder
 if [ ! -f ".env" ]; then
     echo "This script can only be executed in a folder that contains a .env file"
-    echo "with the values POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD"
+    echo "with the values POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_CONTAINER_NAME"
     exit 0
 fi
 
 source .env
 
 # check if environment variables exist
-if [ -z "${POSTGRES_DATABASE}" ] || [ -z "${POSTGRES_USER}" ] || [ -z "${POSTGRES_PASSWORD}" ]; then
-    echo "Check that this values exist in .env file: POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD"
+if [ -z "${POSTGRES_DATABASE}" ] || [ -z "${POSTGRES_USER}" ] || [ -z "${POSTGRES_PASSWORD}" ] || [ -z "${POSTGRES_CONTAINER_NAME}" ]; then
+    echo "Check that this values exist in .env file: POSTGRES_DATABASE, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_CONTAINER_NAME"
     exit 0  # Exit with an error code
 fi
 
 DBNAME=${POSTGRES_DATABASE}
 USER=${POSTGRES_USER}
 PASSWORD=${POSTGRES_PASSWORD}
-PROJECT_NAME=${PROJECT_NAME}
+CONTAINER_NAME=${POSTGRES_CONTAINER_NAME}
 
-DEXEC="docker exec -i ${PROJECT_NAME}-postgres"
+DEXEC="docker exec -i ${CONTAINER_NAME}"
 MDB="psql -U ${USER} -d ${DBNAME} -c"
 MDB2="psql -U ${USER} -d ${DBNAME} -t -A -X -q -c"
 
@@ -35,7 +35,7 @@ elif [ "$1" == "db-show" ]; then
     ${DEXEC} ${MDB} "\l"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
-elif [ "$1" == "tables-show" ]; then
+elif [[ "$1" == "tables-show" || "$1" == "t" ]]; then
     ${DEXEC} ${MDB} "\dt"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
@@ -70,12 +70,19 @@ elif [ "$1" == "table-drop" ]; then
     DROP TABLE IF EXISTS \"$2\""
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
-elif [ "$1" == "select" ]; then
+elif [[ "$1" == "select" || "$1" == "s" ]]; then
     ${DEXEC} ${MDB} "
     SELECT * FROM \"$2\""
 
+# new generic exec
+elif [[ "$1" == "exec" || "$1" == "e" ]]; then
+    # everything after $1 is the SQL statement
+    shift
+    SQL="$*"
+    ${DEXEC} ${MDB} "$SQL"
+
 # ---------/---------/---------/---------/---------/---------/---------/---------/
-elif [ "$1" == "count" ]; then
+elif [[ "$1" == "count" || "$1" == "c" ]]; then
     ${DEXEC} ${MDB} "
     SELECT count(*) FROM \"$2\""
 
@@ -115,26 +122,31 @@ elif [ "$1" == "extensions-show" ]; then
     ${DEXEC} ${MDB} "
     SELECT * FROM pg_extension"
 # ---------/---------/---------/---------/---------/---------/---------/---------/
-elif [[ "$1" == "help" || "$1" == "--help" ]]; then
+elif [[ "$1" == "help" || "$1" == "h" ]]; then
     script=$(basename "$0")    
     echo "$0 - The postgres helper script!"
     echo "---------------------------------------------------------------------------------------------------"
     echo "Usage:"
-    echo "$script check-connection              # A100 - check connection"
-    echo "$script db-show                       # A110 - show all databases"
-    echo "$script tables-show                   # A200 - show all tables"
-    echo "$script table-create name             # A210 - create a table with name"
-    echo "$script table-create-vector name      # A220 - create a table with name, with a column from type vector"
-    echo "$script table-show-columns name       # A230 - show columns of a table"
-    echo "$script table-drop name               # A240 - drop (delete) the table name"
-    echo "$script select name                   # A300 - select some data from name"
-    echo "$script count name                    # A310 - count rows from name"
-    echo "$script dump-table table file         # A400 - dump table to file"
-    echo "$script dump-table-inserts table file # A405 - dump table to file (as inserts)"
-    echo "$script dump-tables folder            # A410 - dump all tables to a folder"
-    echo "$script import-sql file               # A420 - import table from file"
-    echo "$script extension-create-vector       # A500 - create vector extension"
-    echo "$script extensions-show               # A510 - show installed extensions"
+    echo "$script parameter"
+    echo ""
+    echo "Parameters:"    
+    echo "check-connection                 check connection"
+    echo "db-show                          show all databases"
+    echo "tables-show                      (t) show all tables"
+    echo "table-create name                create a table with name"
+    echo "table-create-vector name         create a table with name, with a column from type vector"
+    echo "table-show-columns name          show columns of a table"
+    echo "table-drop name                  drop (delete) the table name"
+    echo "select name                      (s) select some data from name"
+    echo "exec query                       (e) execute a query. Query-String like: 'select * from \"my_table\" limit 10'"
+    echo "count name                       (c) count rows from name"
+    echo "dump-table table file            dump table to file"
+    echo "dump-table-inserts table file    dump table to file (as inserts)"
+    echo "dump-tables folder               dump all tables to a folder"
+    echo "import-sql file                  import table from file"
+    echo "extension-create-vector          create vector extension"
+    echo "extensions-show                  show installed extensions"
+    echo "help                             (h) show this help"
     echo ""
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 
