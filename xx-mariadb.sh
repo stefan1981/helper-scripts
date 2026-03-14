@@ -43,6 +43,11 @@ elif [ "$1" == "drop-db" ]; then
     ${DEXEC} ${MDB} -e "DROP DATABASE $2;"
     echo $2
 
+elif [ "$1" == "db-dump" ]; then
+    echo "dump $DBNAME database into file ($2)"
+    ${DEXEC} mariadb-dump -u root -p${PASSWORD} $DBNAME > $2
+
+
 elif [[ "$1" == "tables-show" || "$1" == "t" ]]; then
     ${DEXEC} ${MDB} --table -e "
         SELECT
@@ -65,6 +70,18 @@ elif [ "$1" == "table-truncate" ]; then
     ${DEXEC} ${MDB} -e "
         TRUNCATE TABLE $2;
     "
+
+elif [ "$1" == "table-dump" ]; then
+    TABLE=$2
+    FILENAME="${3:-${TABLE}.sql}"
+    echo "dump table $TABLE from $DBNAME into file ($FILENAME)"
+    ${DEXEC} mariadb-dump -u root -p${PASSWORD} $DBNAME $TABLE > "$FILENAME"
+
+elif [ "$1" == "table-restore" ]; then
+    TABLE=$2
+    FILENAME=$3
+    echo "restore table $TABLE from $FILENAME into $DBNAME"
+    cat "$FILENAME" | ${DEXEC} mariadb -u root -p${PASSWORD} "$DBNAME"
 
 
 elif [ "$1" == "select-all" ]; then
@@ -91,36 +108,34 @@ elif [ "$1" == "revoke-all-privileges" ]; then
     ${DEXEC} ${MDB} -e "REVOKE ALL PRIVILEGES ON $2.* FROM '$3'@'%'; FLUSH PRIVILEGES;"
     echo $2
 
-elif [ "$1" == "dump-database" ]; then
-    echo "dump general database into file (my_general.sql)"
-    ${DEXEC} mariadb-dump -u root -p${PASSWORD} general > my_general.sql
 
-elif [ "$1" == "restore" ]; then
-    echo "restore my_general.sql into database general2 (delete general2 before)"
-    ${DEXEC} ${MDB} -e "DROP DATABASE IF EXISTS ${DBNAME}"
-    ${DEXEC} ${MDB} -e "CREATE DATABASE IF NOT EXISTS ${DBNAME}"
-    cat my_general.sql | ${DEXEC} ${MDB} ${DBNAME}
-
-
-
-
+elif [[ "$1" == "help" || "$1" == "h" ]]; then
+    script=$(basename "$0")
+    echo "$0 - The mariadb helper script!"
+    echo "---------------------------------------------------------------------------------------------------"
+    echo "Usage:"
+    echo "$script parameter"
+    echo ""
+    echo "Parameters:"
+    echo "db-show                              show all databases"
+    echo "db-drop db                           drop the db with the name db"
+    echo "db-dump filename                     dump current database to filename"
+    echo ""
+    echo "tables-show                          (t) show all tables"
+    echo "table-drop table                     drop a table"
+    echo "table-truncate table                 truncate a table"
+    echo "table-dump table [filename]          dump a single table to file (default: table.sql)"
+    echo "table-restore table filename         restore a single table from file into current database"
+    echo ""
+    echo "select-all table                     select all records from a table"
+    echo "select query                         select the specific query"
+    echo "users-show                           show all users"
+    echo "show-grants user                     show all grants of a specific user"
+    echo "grant-all-privileges db user         grant all privileges for user on db"
+    echo "revoke-all-privileges db user        revoke all privileges for user on db"
+    echo "help                                 (h) show this help"
+    echo ""
 
 else
-    echo "Usage:"
-    echo "✅ xx-mariadb db-show                   # show all dbs"
-    echo "$0 db-drop db                           # drop the db with the name db"
-    echo "✅ xx-mariadb tables-show               # show all dbs"
-    echo "✅ xx-mariadb table-truncate table      # truncate a table"
-    echo "✅ xx-mariadb table-drop table          # drop a table"
-
-    echo "✅ xx-mariadb select-all table          # select all records from a table"
-    echo "✅ xx-mariadb select query              # select the specific query"
-
-    echo "✅ xx-mariadb users-show                # show all users"
-    echo "✅ xx-mariadb show-grants user          # show all grants of a specific user"
-    echo "$0 grant-all-privileges db user         # grant all privileges for user on db"
-    echo "$0 revoke-all-privileges db user        # revoke all privileges for user on db"
-    echo "$0 dump                                 # store db general to my_general.sql file"
-    echo "$0 restore                              # restore my_general.sql file to general2 db"
     exit 1
 fi
