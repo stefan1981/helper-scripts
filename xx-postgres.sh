@@ -161,14 +161,20 @@ elif [ "$1" == "table-truncate" ]; then
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [[ "$1" == "select" || "$1" == "s" ]]; then
     ${DEXEC} ${MDB} "
-    SELECT * FROM \"$2\""
+    SELECT * FROM \"$2\" LIMIT 10"
 
 # new generic exec
-elif [[ "$1" == "exec" || "$1" == "e" ]]; then
+elif [[ "$1" == "exec-query" || "$1" == "e" ]]; then
     # everything after $1 is the SQL statement
     shift
     SQL="$*"
     ${DEXEC} ${MDB} "$SQL"
+
+# ---------/---------/---------/---------/---------/---------/---------/---------/
+elif [[ "$1" == "exec-file" || "$1" == "ef" ]]; then
+    # $2 = path to .sql file
+    cat $2 | ${DEXEC} psql -U ${USER} -d ${DBNAME}
+    echo "Executed SQL from file: $2"
 
 
 
@@ -217,7 +223,8 @@ elif [[ "$1" == "help" || "$1" == "h" ]]; then
     echo "table-truncate name              truncate (empty) the table name"
     echo ""
     echo "select name                      (s) select some data from name"
-    echo "exec query                       (e) execute a query. Query-String like: 'select * from \"my_table\" limit 10'"
+    echo "exec-query query                 (eq) execute a query. Query-String like: 'select * from \"my_table\" limit 10'"
+    echo "exec-file file                   (ef) execute SQL from a file"
     echo "dump-table-inserts table file    dump table to file (as inserts)"
     echo "extension-create-vector          create vector extension"
     echo "extensions-show                  show installed extensions"
