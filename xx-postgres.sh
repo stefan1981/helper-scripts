@@ -161,7 +161,7 @@ elif [ "$1" == "table-truncate" ]; then
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [[ "$1" == "select" || "$1" == "s" ]]; then
     ${DEXEC} ${MDB} "
-    SELECT * FROM \"$2\" LIMIT 10"
+    SELECT * FROM \"$2\" LIMIT 15"
 
 # new generic exec
 elif [[ "$1" == "exec-query" || "$1" == "e" ]]; then
