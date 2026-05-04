@@ -9,6 +9,8 @@ alias xx-zshrc='nvim ~/.zshrc'
 alias xx-source='source ~/.zshrc'
 alias xx-zsh-refresh='source ~/.zshrc; echo "Info: zsh refreshed"'
 
+#
+alias m="cd ~/mid-tech"
 
 # docker
 alias xx-dp="docker ps"                                                                                              
