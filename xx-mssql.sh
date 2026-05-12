@@ -3,15 +3,17 @@
 # check if .env file exists in the current folder
 if [ ! -f ".env" ]; then
     echo "This script can only be executed in a folder that contains a .env file"
-    echo "with the values MSSQL_DATABASE, MSSQL_USER, MSSQL_PASSWORD, MSSQL_CONTAINER_NAME"
+    echo "with the values MSSQL_DATABASE, MSSQL_USER, MSSQL_PASSWORD"
+    echo "optional: MSSQL_CONTAINER_NAME (docker mode) or MSSQL_HOST (local mode, default: localhost)"
     exit 0
 fi
 
 source .env
 
 # check if environment variables exist
-if [ -z "${MSSQL_DATABASE}" ] || [ -z "${MSSQL_USER}" ] || [ -z "${MSSQL_PASSWORD}" ] || [ -z "${MSSQL_CONTAINER_NAME}" ]; then
-    echo "Check that this values exist in .env file: MSSQL_DATABASE, MSSQL_USER, MSSQL_PASSWORD, MSSQL_CONTAINER_NAME"
+if [ -z "${MSSQL_DATABASE}" ] || [ -z "${MSSQL_USER}" ] || [ -z "${MSSQL_PASSWORD}" ]; then
+    echo "Check that these values exist in .env file: MSSQL_DATABASE, MSSQL_USER, MSSQL_PASSWORD"
+    echo "optional: MSSQL_CONTAINER_NAME (docker mode) or MSSQL_HOST (local mode, default: localhost)"
     exit 0
 fi
 
@@ -20,26 +22,35 @@ USER=${MSSQL_USER}
 PASSWORD=${MSSQL_PASSWORD}
 CONTAINER_NAME=${MSSQL_CONTAINER_NAME}
 
-# sqlcmd path inside container — override with MSSQL_SQLCMD in .env if needed
-# /opt/mssql-tools18/bin/sqlcmd (mssql-server 2022+) or /opt/mssql-tools/bin/sqlcmd (older)
-SQLCMD=${MSSQL_SQLCMD:-/opt/mssql-tools18/bin/sqlcmd}
+# local mode when MSSQL_CONTAINER_NAME is absent; docker mode otherwise
+if [ -n "${CONTAINER_NAME}" ]; then
+    MODE="docker"
+    # /opt/mssql-tools18/bin/sqlcmd (mssql-server 2022+) or /opt/mssql-tools/bin/sqlcmd (older)
+    SQLCMD=${MSSQL_SQLCMD:-/opt/mssql-tools18/bin/sqlcmd}
+    DEXEC="docker exec -i ${CONTAINER_NAME}"
+else
+    MODE="local"
+    SQLCMD=${MSSQL_SQLCMD:-sqlcmd}
+    DEXEC=""
+fi
 
-DEXEC="docker exec -i ${CONTAINER_NAME}"
+# MSSQL_HOST can be "server", "server,port", or "server\instance" — sqlcmd -S syntax
+MSSQL_HOST=${MSSQL_HOST:-localhost}
 # -C trust server cert, -N encrypt, -b exit on error,
 # -W trim trailing whitespace (tight columns), -w 1024 wider line buffer,
 # -s "  " two-space column separator for readable spacing
 # (arrays — needed so the two-space -s value survives word-splitting)
-MDB=("${SQLCMD}" -S localhost -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -Y 50)
+MDB=("${SQLCMD}" -S "${MSSQL_HOST}" -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -W -s "|")
 # server-level commands (login to master, which always exists)
-MDB_MASTER=("${SQLCMD}" -S localhost -U "${USER}" -P "${PASSWORD}" -d master -C -N -b -Y 50)
+MDB_MASTER=("${SQLCMD}" -S "${MSSQL_HOST}" -U "${USER}" -P "${PASSWORD}" -d master -C -N -b -W -s "|")
 # headerless plain output
-MDB2=("${SQLCMD}" -S localhost -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -h -1 -Y 50)
+MDB2=("${SQLCMD}" -S "${MSSQL_HOST}" -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -h -1 -W)
 
 
 
 if [ "$1" == "check-connection" ]; then
     echo "..."
-    ${DEXEC} "${MDB_MASTER[@]}" -Q "SELECT @@VERSION;"
+    ${DEXEC} "${MDB_MASTER[@]}" -Q "SELECT @@VERSION;" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "db-show" ]; then
@@ -54,7 +65,7 @@ elif [ "$1" == "db-show" ]; then
         FROM sys.databases d
         LEFT JOIN sys.master_files mf ON d.database_id = mf.database_id
         GROUP BY d.name, d.state_desc, d.owner_sid, d.collation_name, d.recovery_model_desc
-        ORDER BY size_mb DESC;"
+        ORDER BY size_mb DESC;" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "db-create" ]; then
@@ -70,32 +81,86 @@ elif [ "$1" == "db-drop" ]; then
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "db-store" ]; then
-    # $2 = path on host to write the .bak to
-    # backup runs server-side, then we copy out of the container
-    BACKUP_IN_CONTAINER="/var/opt/mssql/backup/${DBNAME}.bak"
-    ${DEXEC} mkdir -p /var/opt/mssql/backup
-    ${DEXEC} "${MDB[@]}" -d master -Q "
-        BACKUP DATABASE [${DBNAME}]
-        TO DISK = N'${BACKUP_IN_CONTAINER}'
-        WITH FORMAT, INIT, COMPRESSION, STATS = 10;"
-    docker cp "${CONTAINER_NAME}:${BACKUP_IN_CONTAINER}" "$2"
-    ${DEXEC} rm -f "${BACKUP_IN_CONTAINER}"
+    # $2 = path to write the .bak to
+    if [ "${MODE}" == "docker" ]; then
+        # backup inside container, then copy out
+        BACKUP_IN_CONTAINER="/var/opt/mssql/backup/${DBNAME}.bak"
+        ${DEXEC} mkdir -p /var/opt/mssql/backup
+        ${DEXEC} "${MDB[@]}" -d master -Q "
+            BACKUP DATABASE [${DBNAME}]
+            TO DISK = N'${BACKUP_IN_CONTAINER}'
+            WITH FORMAT, INIT, COMPRESSION, STATS = 10;"
+        docker cp "${CONTAINER_NAME}:${BACKUP_IN_CONTAINER}" "$2"
+        ${DEXEC} rm -f "${BACKUP_IN_CONTAINER}"
+    else
+        # convert WSL /mnt/X/... paths to Windows X:\... paths for SQL Server
+        BAK_PATH="$2"
+        if [[ "$2" =~ ^/mnt/([a-zA-Z])/(.*) ]]; then
+            drive="${BASH_REMATCH[1]^^}"
+            rest=$(echo "${BASH_REMATCH[2]}" | tr '/' '\\')
+            BAK_PATH="${drive}:\\${rest}"
+        fi
+        "${MDB[@]}" -d master -Q "
+            BACKUP DATABASE [${DBNAME}]
+            TO DISK = N'${BAK_PATH}'
+            WITH FORMAT, INIT, COMPRESSION, STATS = 10;"
+    fi
     echo "Database dumped to $2"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "db-restore" ]; then
-    # $2 = host path to a .bak file
-    BACKUP_IN_CONTAINER="/var/opt/mssql/backup/restore.bak"
-    ${DEXEC} mkdir -p /var/opt/mssql/backup
-    docker cp "$2" "${CONTAINER_NAME}:${BACKUP_IN_CONTAINER}"
-    ${DEXEC} "${MDB[@]}" -d master -Q "
-        ALTER DATABASE [${DBNAME}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-        RESTORE DATABASE [${DBNAME}]
-        FROM DISK = N'${BACKUP_IN_CONTAINER}'
-        WITH REPLACE, STATS = 10;
-        ALTER DATABASE [${DBNAME}] SET MULTI_USER;"
-    ${DEXEC} rm -f "${BACKUP_IN_CONTAINER}"
+    # $2 = path to a .bak file
+    if [ "${MODE}" == "docker" ]; then
+        # copy file into container, then restore
+        BACKUP_IN_CONTAINER="/var/opt/mssql/backup/restore.bak"
+        ${DEXEC} mkdir -p /var/opt/mssql/backup
+        docker cp "$2" "${CONTAINER_NAME}:${BACKUP_IN_CONTAINER}"
+        ${DEXEC} "${MDB[@]}" -d master -Q "
+            IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'${DBNAME}')
+                ALTER DATABASE [${DBNAME}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+            RESTORE DATABASE [${DBNAME}]
+            FROM DISK = N'${BACKUP_IN_CONTAINER}'
+            WITH REPLACE, STATS = 10;
+            ALTER DATABASE [${DBNAME}] SET MULTI_USER;"
+        ${DEXEC} rm -f "${BACKUP_IN_CONTAINER}"
+    else
+        # convert WSL /mnt/X/... paths to Windows X:\... paths for SQL Server
+        BAK_PATH="$2"
+        if [[ "$2" =~ ^/mnt/([a-zA-Z])/(.*) ]]; then
+            drive="${BASH_REMATCH[1]^^}"
+            rest=$(echo "${BASH_REMATCH[2]}" | tr '/' '\\')
+            BAK_PATH="${drive}:\\${rest}"
+        fi
+        "${MDB[@]}" -d master -Q "
+            IF EXISTS (SELECT 1 FROM sys.databases WHERE name = N'${DBNAME}')
+                ALTER DATABASE [${DBNAME}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+            RESTORE DATABASE [${DBNAME}]
+            FROM DISK = N'${BAK_PATH}'
+            WITH REPLACE, STATS = 10;
+            ALTER DATABASE [${DBNAME}] SET MULTI_USER;"
+    fi
     echo "Database restored from $2"
+
+# ---------/---------/---------/---------/---------/---------/---------/---------/
+elif [ "$1" == "schema-show" ]; then
+    ${DEXEC} "${MDB[@]}" -Q "
+        SELECT
+            s.name                             AS schema_name,
+            p.name                             AS owner,
+            s.schema_id
+        FROM sys.schemas s
+        INNER JOIN sys.database_principals p ON s.principal_id = p.principal_id
+        ORDER BY s.name;" | column -t -s "|"
+
+# ---------/---------/---------/---------/---------/---------/---------/---------/
+elif [ "$1" == "schema-create" ]; then
+    ${DEXEC} "${MDB[@]}" -Q "CREATE SCHEMA [$2];"
+    echo "Schema $2 created"
+
+# ---------/---------/---------/---------/---------/---------/---------/---------/
+elif [ "$1" == "schema-drop" ]; then
+    ${DEXEC} "${MDB[@]}" -Q "DROP SCHEMA IF EXISTS [$2];"
+    echo "Schema $2 dropped"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [[ "$1" == "tables-show" || "$1" == "t" ]]; then
@@ -116,11 +181,11 @@ elif [[ "$1" == "tables-show" || "$1" == "t" ]]; then
         INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
         WHERE i.index_id IN (0,1)
         GROUP BY s.name, t.name, p.rows
-        ORDER BY size_mb DESC;"
+        ORDER BY size_mb DESC;" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [[ "$1" == "table-count" || "$1" == "c" ]]; then
-    ${DEXEC} "${MDB[@]}" -Q "SELECT COUNT(*) FROM [$2];"
+    ${DEXEC} "${MDB[@]}" -Q "SELECT COUNT(*) FROM [$2];" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "table-create" ]; then
@@ -146,7 +211,7 @@ elif [ "$1" == "table-show-columns" ] || [ "$1" == "table-describe" ]; then
         FROM sys.columns c
         INNER JOIN sys.types t ON c.user_type_id = t.user_type_id
         WHERE c.object_id = OBJECT_ID('$2')
-        ORDER BY c.column_id;"
+        ORDER BY c.column_id;" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "table-drop" ]; then
@@ -173,18 +238,18 @@ elif [ "$1" == "table-truncate" ]; then
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [[ "$1" == "select" || "$1" == "s" ]]; then
-    ${DEXEC} "${MDB[@]}" -Q "SELECT TOP 15 * FROM [$2];"
+    ${DEXEC} "${MDB[@]}" -Q "SELECT TOP 15 * FROM [$2];" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [[ "$1" == "exec-query" || "$1" == "e" ]]; then
     shift
     SQL="$*"
-    ${DEXEC} "${MDB[@]}" -Q "$SQL"
+    ${DEXEC} "${MDB[@]}" -Q "$SQL" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [[ "$1" == "exec-file" || "$1" == "ef" ]]; then
     # $2 = host path to .sql file
-    cat "$2" | ${DEXEC} "${MDB[@]}"
+    cat "$2" | ${DEXEC} "${MDB[@]}" | column -t -s "|"
     echo "Executed SQL from file: $2"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
@@ -195,7 +260,7 @@ elif [ "$1" == "users-show" ]; then
         FROM sys.database_principals
         WHERE type IN ('S','U','G')
           AND name NOT LIKE '##%'
-        ORDER BY name;"
+        ORDER BY name;" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "show-grants" ]; then
@@ -208,7 +273,7 @@ elif [ "$1" == "show-grants" ]; then
         FROM sys.database_permissions dp
         INNER JOIN sys.database_principals u ON dp.grantee_principal_id = u.principal_id
         WHERE u.name = '$2'
-        ORDER BY dp.class_desc, object_name, dp.permission_name;"
+        ORDER BY dp.class_desc, object_name, dp.permission_name;" | column -t -s "|"
 
 # ---------/---------/---------/---------/---------/---------/---------/---------/
 elif [ "$1" == "grant-all-privileges" ]; then
@@ -229,6 +294,9 @@ elif [[ "$1" == "help" || "$1" == "h" ]]; then
     script=$(basename "$0")
     echo "$0 - The mssql helper script!"
     echo "---------------------------------------------------------------------------------------------------"
+    echo "Mode: ${MODE} (set MSSQL_CONTAINER_NAME in .env for docker mode, omit it for local mode)"
+    echo "      local mode uses 'sqlcmd' from PATH and connects to MSSQL_HOST (default: localhost)"
+    echo "---------------------------------------------------------------------------------------------------"
     echo "Usage:"
     echo "$script parameter"
     echo ""
@@ -240,7 +308,11 @@ elif [[ "$1" == "help" || "$1" == "h" ]]; then
     echo "db-store file                    backup database (${DBNAME}) to .bak file on host"
     echo "db-restore file                  restore database (${DBNAME}) from .bak file"
     echo ""
-    echo "tables-show [db]                 (t) show tables with row count and size (defaults to ${DBNAME})"
+    echo "schema-show                      show all schemas with owner"
+echo "schema-create name               create a schema"
+echo "schema-drop name                 drop (delete) a schema"
+echo ""
+echo "tables-show [db]                 (t) show tables with row count and size (defaults to ${DBNAME})"
     echo "table-count name                 (c) count rows of table"
     echo "table-create name                create an example table"
     echo "table-show-columns name          (table-describe) show columns of a table"
@@ -264,7 +336,7 @@ else
     clear
 
     printf "\033[1;34m--- Server version ---\033[0m \n"
-    ${DEXEC} "${MDB_MASTER[@]}" -Q "SELECT @@VERSION AS version;"
+    ${DEXEC} "${MDB_MASTER[@]}" -Q "SELECT @@VERSION AS version;" | column -t -s "|"
 
     printf "\033[1;34m--- Active sessions ---\033[0m \n"
     ${DEXEC} "${MDB_MASTER[@]}" -Q "
@@ -273,7 +345,7 @@ else
             status, cpu_time, memory_usage, total_elapsed_time, last_request_end_time
         FROM sys.dm_exec_sessions
         WHERE is_user_process = 1
-        ORDER BY last_request_end_time DESC;"
+        ORDER BY last_request_end_time DESC;" | column -t -s "|"
 
     printf "\033[1;34m--- Connections by database ---\033[0m \n"
     ${DEXEC} "${MDB_MASTER[@]}" -Q "
@@ -285,7 +357,7 @@ else
         FROM sys.dm_exec_sessions
         WHERE is_user_process = 1
         GROUP BY database_id
-        ORDER BY total DESC;"
+        ORDER BY total DESC;" | column -t -s "|"
 
     printf "\033[1;34m--- Database file sizes ---\033[0m \n"
     ${DEXEC} "${MDB_MASTER[@]}" -Q "
@@ -295,7 +367,7 @@ else
             name AS logical_name,
             CAST(size * 8.0 / 1024 AS DECIMAL(10,2)) AS size_mb
         FROM sys.master_files
-        ORDER BY database_id, type_desc;"
+        ORDER BY database_id, type_desc;" | column -t -s "|"
 
     printf "\033[1;34m--- Buffer cache hit ratio ---\033[0m \n"
     ${DEXEC} "${MDB_MASTER[@]}" -Q "
@@ -305,7 +377,7 @@ else
                      AND object_name LIKE '%Buffer Manager%') AS FLOAT) /
              NULLIF((SELECT cntr_value FROM sys.dm_os_performance_counters
                      WHERE counter_name = 'Buffer cache hit ratio base'
-                       AND object_name LIKE '%Buffer Manager%'), 0)) * 100 AS hit_ratio_pct;"
+                       AND object_name LIKE '%Buffer Manager%'), 0)) * 100 AS hit_ratio_pct;" | column -t -s "|"
 
     # only show top tables if the configured database exists
     DB_EXISTS=$(${DEXEC} "${MDB_MASTER[@]}" -h -1 -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM sys.databases WHERE name = '${DBNAME}';" | tr -d '[:space:]')
@@ -324,7 +396,7 @@ else
         INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
         WHERE i.index_id IN (0,1)
         GROUP BY s.name, t.name, p.rows
-        ORDER BY size_mb DESC;"
+        ORDER BY size_mb DESC;" | column -t -s "|"
     else
         printf "\033[1;33m(database '${DBNAME}' does not exist yet — run 'db-create' to create it)\033[0m\n"
     fi
