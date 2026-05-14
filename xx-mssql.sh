@@ -21,6 +21,7 @@ DBNAME=${MSSQL_DATABASE}
 USER=${MSSQL_USER}
 PASSWORD=${MSSQL_PASSWORD}
 CONTAINER_NAME=${MSSQL_CONTAINER_NAME}
+PORT=${MSSQL_PORT}
 
 # local mode when MSSQL_CONTAINER_NAME is absent; docker mode otherwise
 if [ -n "${CONTAINER_NAME}" ]; then
@@ -36,15 +37,21 @@ fi
 
 # MSSQL_HOST can be "server", "server,port", or "server\instance" — sqlcmd -S syntax
 MSSQL_HOST=${MSSQL_HOST:-localhost}
+# append port from MSSQL_PORT if set (sqlcmd uses "host,port" notation)
+if [ -n "${PORT}" ]; then
+    MSSQL_HOST_PORT="${MSSQL_HOST},${PORT}"
+else
+    MSSQL_HOST_PORT="${MSSQL_HOST}"
+fi
 # -C trust server cert, -N encrypt, -b exit on error,
 # -W trim trailing whitespace (tight columns), -w 1024 wider line buffer,
 # -s "  " two-space column separator for readable spacing
 # (arrays — needed so the two-space -s value survives word-splitting)
-MDB=("${SQLCMD}" -S "${MSSQL_HOST}" -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -W -s "|")
+MDB=("${SQLCMD}" -S "${MSSQL_HOST_PORT}" -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -W -s "|")
 # server-level commands (login to master, which always exists)
-MDB_MASTER=("${SQLCMD}" -S "${MSSQL_HOST}" -U "${USER}" -P "${PASSWORD}" -d master -C -N -b -W -s "|")
+MDB_MASTER=("${SQLCMD}" -S "${MSSQL_HOST_PORT}" -U "${USER}" -P "${PASSWORD}" -d master -C -N -b -W -s "|")
 # headerless plain output
-MDB2=("${SQLCMD}" -S "${MSSQL_HOST}" -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -h -1 -W)
+MDB2=("${SQLCMD}" -S "${MSSQL_HOST_PORT}" -U "${USER}" -P "${PASSWORD}" -d "${DBNAME}" -C -N -b -h -1 -W)
 
 
 
